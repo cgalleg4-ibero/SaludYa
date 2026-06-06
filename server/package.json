@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "node src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "npm build": "echo 'No build step needed for this server'"
   },
   "dependencies": {
     "bcrypt": "5.1.0",
