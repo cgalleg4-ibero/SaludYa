@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: saludya-backend
+    env: node
+    plan: free
+    root: server
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: MONGO_URI
+      - key: CORS_ORIGIN
+      - key: NODE_ENV
+      - key: PORT
