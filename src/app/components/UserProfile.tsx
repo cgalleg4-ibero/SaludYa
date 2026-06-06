@@ -1,5 +1,7 @@
-import { useState } from 'react';
-import { User, Save, ArrowLeft, Plus, X, AlertCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { User, Save, ArrowLeft, Plus, X } from 'lucide-react';
+import { getProfile, updateProfile } from '../api';
+import { success as notifySuccess, error as notifyError } from '../utils/notify';
 
 interface UserProfileProps {
   onBack: () => void;
@@ -32,35 +34,98 @@ interface MedicalHistory {
 
 export function UserProfile({ onBack }: UserProfileProps) {
   const [activeTab, setActiveTab] = useState<'personal' | 'medical'>('personal');
-  const [showSuccess, setShowSuccess] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [originalProfileData, setOriginalProfileData] = useState<ProfileData | null>(null);
+  const [originalMedicalHistory, setOriginalMedicalHistory] = useState<MedicalHistory | null>(null);
 
   const [profileData, setProfileData] = useState<ProfileData>({
-    nombre: 'Juan',
-    apellido: 'Pérez',
-    email: 'juan.perez@example.com',
-    telefono: '5512345678',
-    fechaNacimiento: '1985-03-15',
-    genero: 'masculino',
-    direccion: 'Av. Reforma 123',
-    ciudad: 'Ciudad de México',
-    codigoPostal: '06600',
-    grupoSanguineo: 'O+'
+    nombre: '',
+    apellido: '',
+    email: '',
+    telefono: '',
+    fechaNacimiento: '',
+    genero: '',
+    direccion: '',
+    ciudad: '',
+    codigoPostal: '',
+    grupoSanguineo: ''
   });
 
   const [medicalHistory, setMedicalHistory] = useState<MedicalHistory>({
-    alergias: ['Penicilina', 'Polen'],
-    enfermedadesCronicas: ['Hipertensión'],
-    medicamentosActuales: ['Losartán 50mg'],
-    cirugiasPrevias: ['Apendicectomía (2015)'],
+    alergias: [],
+    enfermedadesCronicas: [],
+    medicamentosActuales: [],
+    cirugiasPrevias: [],
     contactoEmergencia: {
-      nombre: 'María Pérez',
-      telefono: '5598765432',
-      relacion: 'Hermana'
+      nombre: '',
+      telefono: '',
+      relacion: ''
     }
   });
 
   const [newItem, setNewItem] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      setLoading(true);
+      try {
+        const user = await getProfile();
+
+        setProfileData({
+          nombre: user.nombre || '',
+          apellido: user.apellido || '',
+          email: user.email || '',
+          telefono: user.telefono || '',
+          fechaNacimiento: user.fechaNacimiento ? user.fechaNacimiento.substring(0, 10) : '',
+          genero: user.genero || '',
+          direccion: user.direccion || '',
+          ciudad: user.ciudad || '',
+          codigoPostal: user.codigoPostal || '',
+          grupoSanguineo: user.grupoSanguineo || ''
+        });
+
+        const loadedProfileData = {
+          nombre: user.nombre || '',
+          apellido: user.apellido || '',
+          email: user.email || '',
+          telefono: user.telefono || '',
+          fechaNacimiento: user.fechaNacimiento ? user.fechaNacimiento.substring(0, 10) : '',
+          genero: user.genero || '',
+          direccion: user.direccion || '',
+          ciudad: user.ciudad || '',
+          codigoPostal: user.codigoPostal || '',
+          grupoSanguineo: user.grupoSanguineo || ''
+        };
+
+        const loadedMedicalHistory = {
+          alergias: user.medicalHistory?.alergias || [],
+          enfermedadesCronicas: user.medicalHistory?.enfermedadesCronicas || [],
+          medicamentosActuales: user.medicalHistory?.medicamentosActuales || [],
+          cirugiasPrevias: user.medicalHistory?.cirugiasPrevias || [],
+          contactoEmergencia: {
+            nombre: user.medicalHistory?.contactoEmergencia?.nombre || '',
+            telefono: user.medicalHistory?.contactoEmergencia?.telefono || '',
+            relacion: user.medicalHistory?.contactoEmergencia?.relacion || ''
+          }
+        };
+
+        setProfileData(loadedProfileData);
+        setMedicalHistory(loadedMedicalHistory);
+        setOriginalProfileData(loadedProfileData);
+        setOriginalMedicalHistory(loadedMedicalHistory);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'No se pudo cargar el perfil';
+        notifyError('Error', msg);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadProfile();
+  }, []);
 
   const handleProfileChange = (field: keyof ProfileData, value: string) => {
     setProfileData(prev => ({ ...prev, [field]: value }));
@@ -113,14 +178,45 @@ export function UserProfile({ onBack }: UserProfileProps) {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSave = () => {
+  const hasChanges = (): boolean => {
+    if (!originalProfileData || !originalMedicalHistory) return false;
+    return JSON.stringify(profileData) !== JSON.stringify(originalProfileData) ||
+      JSON.stringify(medicalHistory) !== JSON.stringify(originalMedicalHistory);
+  };
+
+  const handleCancel = () => {
+    if (originalProfileData && originalMedicalHistory) {
+      setProfileData(originalProfileData);
+      setMedicalHistory(originalMedicalHistory);
+    }
+    setErrors({});
+    setIsEditing(false);
+  };
+
+  const inputDisabled = !isEditing;
+
+  const handleSave = async () => {
     if (activeTab === 'personal') {
       if (!validatePersonalData()) return;
     }
 
-    console.log('Saving data:', { profileData, medicalHistory });
-    setShowSuccess(true);
-    setTimeout(() => setShowSuccess(false), 3000);
+    setSaving(true);
+
+    try {
+      await updateProfile({
+        ...profileData,
+        medicalHistory
+      });
+      setOriginalProfileData(profileData);
+      setOriginalMedicalHistory(medicalHistory);
+      setIsEditing(false);
+      notifySuccess('Cambios guardados');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'No se pudo guardar el perfil';
+      notifyError('Error', msg);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -146,36 +242,55 @@ export function UserProfile({ onBack }: UserProfileProps) {
                 </p>
               </div>
             </div>
-            <button
-              onClick={handleSave}
-              className="flex items-center gap-2 px-6 py-2 rounded-lg transition-all duration-200 hover:opacity-90"
-              style={{
-                backgroundColor: 'var(--primary)',
-                color: 'var(--primary-foreground)'
-              }}
-            >
-              <Save size={18} />
-              <span>Guardar Cambios</span>
-            </button>
+            {isEditing ? (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleCancel}
+                  disabled={saving}
+                  className="px-6 py-2 rounded-lg transition-all duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{
+                    backgroundColor: 'transparent',
+                    color: 'var(--foreground)',
+                    border: `1px solid var(--border)`
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !hasChanges()}
+                  className="flex items-center gap-2 px-6 py-2 rounded-lg transition-all duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{
+                    backgroundColor: 'var(--primary)',
+                    color: 'var(--primary-foreground)'
+                  }}
+                >
+                  <Save size={18} />
+                  <span>{saving ? 'Guardando...' : 'Guardar Cambios'}</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="px-6 py-2 rounded-lg transition-all duration-200 hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--primary)',
+                  color: 'var(--primary-foreground)'
+                }}
+              >
+                Modificar Perfil
+              </button>
+            )}
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Success Message */}
-        {showSuccess && (
-          <div
-            className="mb-6 px-4 py-3 rounded-lg flex items-center gap-2"
-            style={{
-              backgroundColor: 'rgba(54, 179, 126, 0.1)',
-              color: 'var(--secondary)',
-              border: `1px solid var(--secondary)`
-            }}
-          >
-            <AlertCircle size={20} />
-            <span>Cambios guardados exitosamente</span>
+        {loading ? (
+          <div className="rounded-lg p-8 shadow-md" style={{ backgroundColor: 'var(--card)' }}>
+            <p style={{ color: 'var(--muted-foreground)' }}>Cargando perfil...</p>
           </div>
-        )}
+        ) : null}
 
         {/* Tabs */}
         <div className="mb-6" style={{ borderBottom: `2px solid var(--border)` }}>
@@ -234,7 +349,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   type="text"
                   value={profileData.nombre}
                   onChange={(e) => handleProfileChange('nombre', e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2"
+                  disabled={inputDisabled}
+                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid ${errors.nombre ? 'var(--destructive)' : 'var(--border)'}`,
@@ -256,7 +372,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   type="text"
                   value={profileData.apellido}
                   onChange={(e) => handleProfileChange('apellido', e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2"
+                  disabled={inputDisabled}
+                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid ${errors.apellido ? 'var(--destructive)' : 'var(--border)'}`,
@@ -278,7 +395,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   type="email"
                   value={profileData.email}
                   onChange={(e) => handleProfileChange('email', e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2"
+                  disabled={inputDisabled}
+                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid ${errors.email ? 'var(--destructive)' : 'var(--border)'}`,
@@ -300,7 +418,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   type="tel"
                   value={profileData.telefono}
                   onChange={(e) => handleProfileChange('telefono', e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2"
+                  disabled={inputDisabled}
+                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid ${errors.telefono ? 'var(--destructive)' : 'var(--border)'}`,
@@ -322,7 +441,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   type="date"
                   value={profileData.fechaNacimiento}
                   onChange={(e) => handleProfileChange('fechaNacimiento', e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2"
+                  disabled={inputDisabled}
+                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid var(--border)`,
@@ -338,7 +458,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                 <select
                   value={profileData.genero}
                   onChange={(e) => handleProfileChange('genero', e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2"
+                  disabled={inputDisabled}
+                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid var(--border)`,
@@ -360,7 +481,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   type="text"
                   value={profileData.direccion}
                   onChange={(e) => handleProfileChange('direccion', e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2"
+                  disabled={inputDisabled}
+                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid var(--border)`,
@@ -377,7 +499,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   type="text"
                   value={profileData.ciudad}
                   onChange={(e) => handleProfileChange('ciudad', e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2"
+                  disabled={inputDisabled}
+                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid var(--border)`,
@@ -394,7 +517,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   type="text"
                   value={profileData.codigoPostal}
                   onChange={(e) => handleProfileChange('codigoPostal', e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2"
+                  disabled={inputDisabled}
+                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid var(--border)`,
@@ -410,7 +534,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                 <select
                   value={profileData.grupoSanguineo}
                   onChange={(e) => handleProfileChange('grupoSanguineo', e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2"
+                  disabled={inputDisabled}
+                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid var(--border)`,
@@ -447,7 +572,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   onChange={(e) => setNewItem(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && addMedicalItem('alergias')}
                   placeholder="Agregar alergia"
-                  className="flex-1 px-4 py-2 rounded-lg"
+                  disabled={inputDisabled}
+                  className="flex-1 px-4 py-2 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid var(--border)`,
@@ -456,7 +582,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                 />
                 <button
                   onClick={() => addMedicalItem('alergias')}
-                  className="px-4 py-2 rounded-lg transition-all duration-200 hover:opacity-90"
+                  disabled={inputDisabled}
+                  className="px-4 py-2 rounded-lg transition-all duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--primary)',
                     color: 'var(--primary-foreground)'
@@ -479,7 +606,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                     <span style={{ fontSize: 'var(--text-body)' }}>{alergia}</span>
                     <button
                       onClick={() => removeMedicalItem('alergias', index)}
-                      className="hover:opacity-70"
+                      disabled={inputDisabled}
+                      className="hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <X size={16} />
                     </button>
@@ -505,7 +633,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   onChange={(e) => setNewItem(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && addMedicalItem('enfermedadesCronicas')}
                   placeholder="Agregar enfermedad crónica"
-                  className="flex-1 px-4 py-2 rounded-lg"
+                  disabled={inputDisabled}
+                  className="flex-1 px-4 py-2 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid var(--border)`,
@@ -514,7 +643,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                 />
                 <button
                   onClick={() => addMedicalItem('enfermedadesCronicas')}
-                  className="px-4 py-2 rounded-lg transition-all duration-200 hover:opacity-90"
+                  disabled={inputDisabled}
+                  className="px-4 py-2 rounded-lg transition-all duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--primary)',
                     color: 'var(--primary-foreground)'
@@ -537,7 +667,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                     <span style={{ fontSize: 'var(--text-body)' }}>{enfermedad}</span>
                     <button
                       onClick={() => removeMedicalItem('enfermedadesCronicas', index)}
-                      className="hover:opacity-70"
+                      disabled={inputDisabled}
+                      className="hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <X size={16} />
                     </button>
@@ -563,7 +694,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   onChange={(e) => setNewItem(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && addMedicalItem('medicamentosActuales')}
                   placeholder="Agregar medicamento"
-                  className="flex-1 px-4 py-2 rounded-lg"
+                  disabled={inputDisabled}
+                  className="flex-1 px-4 py-2 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid var(--border)`,
@@ -572,7 +704,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                 />
                 <button
                   onClick={() => addMedicalItem('medicamentosActuales')}
-                  className="px-4 py-2 rounded-lg transition-all duration-200 hover:opacity-90"
+                  disabled={inputDisabled}
+                  className="px-4 py-2 rounded-lg transition-all duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--primary)',
                     color: 'var(--primary-foreground)'
@@ -595,7 +728,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                     <span style={{ fontSize: 'var(--text-body)' }}>{medicamento}</span>
                     <button
                       onClick={() => removeMedicalItem('medicamentosActuales', index)}
-                      className="hover:opacity-70"
+                      disabled={inputDisabled}
+                      className="hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <X size={16} />
                     </button>
@@ -621,7 +755,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                   onChange={(e) => setNewItem(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && addMedicalItem('cirugiasPrevias')}
                   placeholder="Agregar cirugía"
-                  className="flex-1 px-4 py-2 rounded-lg"
+                  disabled={inputDisabled}
+                  className="flex-1 px-4 py-2 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--input-background)',
                     border: `1px solid var(--border)`,
@@ -630,7 +765,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                 />
                 <button
                   onClick={() => addMedicalItem('cirugiasPrevias')}
-                  className="px-4 py-2 rounded-lg transition-all duration-200 hover:opacity-90"
+                  disabled={inputDisabled}
+                  className="px-4 py-2 rounded-lg transition-all duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                   style={{
                     backgroundColor: 'var(--primary)',
                     color: 'var(--primary-foreground)'
@@ -653,7 +789,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                     <span style={{ fontSize: 'var(--text-body)' }}>{cirugia}</span>
                     <button
                       onClick={() => removeMedicalItem('cirugiasPrevias', index)}
-                      className="hover:opacity-70"
+                      disabled={inputDisabled}
+                      className="hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <X size={16} />
                     </button>
@@ -681,7 +818,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                     type="text"
                     value={medicalHistory.contactoEmergencia.nombre}
                     onChange={(e) => handleEmergencyContactChange('nombre', e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg"
+                    disabled={inputDisabled}
+                    className="w-full px-4 py-2 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
                     style={{
                       backgroundColor: 'var(--input-background)',
                       border: `1px solid var(--border)`,
@@ -697,7 +835,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                     type="tel"
                     value={medicalHistory.contactoEmergencia.telefono}
                     onChange={(e) => handleEmergencyContactChange('telefono', e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg"
+                    disabled={inputDisabled}
+                    className="w-full px-4 py-2 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
                     style={{
                       backgroundColor: 'var(--input-background)',
                       border: `1px solid var(--border)`,
@@ -713,7 +852,8 @@ export function UserProfile({ onBack }: UserProfileProps) {
                     type="text"
                     value={medicalHistory.contactoEmergencia.relacion}
                     onChange={(e) => handleEmergencyContactChange('relacion', e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg"
+                    disabled={inputDisabled}
+                    className="w-full px-4 py-2 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
                     style={{
                       backgroundColor: 'var(--input-background)',
                       border: `1px solid var(--border)`,

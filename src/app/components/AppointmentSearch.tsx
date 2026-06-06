@@ -1,9 +1,10 @@
 import { Search, Filter, Calendar, Clock, User, ArrowLeft } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { getDoctors, getDoctorSlots } from '../api';
 
 interface AppointmentSearchProps {
   onBack: () => void;
-  onSelectDoctor: (doctorId: string) => void;
+  onSelectDoctor: (doctorId: string, doctorName: string) => void;
 }
 
 interface Doctor {
@@ -16,62 +17,7 @@ interface Doctor {
   consultations: number;
 }
 
-const mockDoctors: Doctor[] = [
-  {
-    id: '1',
-    name: 'Dra. María González',
-    specialty: 'Cardiología',
-    available: true,
-    nextAvailable: '2026-05-05 10:00',
-    rating: 4.8,
-    consultations: 245
-  },
-  {
-    id: '2',
-    name: 'Dr. Carlos Ramírez',
-    specialty: 'Medicina General',
-    available: true,
-    nextAvailable: '2026-05-05 14:30',
-    rating: 4.9,
-    consultations: 312
-  },
-  {
-    id: '3',
-    name: 'Dra. Ana Martínez',
-    specialty: 'Dermatología',
-    available: true,
-    nextAvailable: '2026-05-06 09:00',
-    rating: 4.7,
-    consultations: 198
-  },
-  {
-    id: '4',
-    name: 'Dr. Roberto Silva',
-    specialty: 'Traumatología',
-    available: false,
-    nextAvailable: '2026-05-08 11:00',
-    rating: 4.6,
-    consultations: 156
-  },
-  {
-    id: '5',
-    name: 'Dra. Laura Fernández',
-    specialty: 'Pediatría',
-    available: true,
-    nextAvailable: '2026-05-05 16:00',
-    rating: 5.0,
-    consultations: 421
-  },
-  {
-    id: '6',
-    name: 'Dr. Pedro López',
-    specialty: 'Neurología',
-    available: true,
-    nextAvailable: '2026-05-06 15:30',
-    rating: 4.8,
-    consultations: 287
-  }
-];
+// Data is loaded from the backend; remove local mocks.
 
 const specialties = [
   'Todas',
@@ -88,8 +34,76 @@ export function AppointmentSearch({ onBack, onSelectDoctor }: AppointmentSearchP
   const [selectedSpecialty, setSelectedSpecialty] = useState('Todas');
   const [selectedDate, setSelectedDate] = useState('');
   const [showAvailableOnly, setShowAvailableOnly] = useState(false);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [overrideNext, setOverrideNext] = useState<Record<string, string | null>>({});
 
-  const filteredDoctors = mockDoctors.filter(doctor => {
+  useEffect(() => {
+    const loadDoctors = async () => {
+      setLoading(true);
+      setError('');
+
+      try {
+        const response = await getDoctors({
+          specialty: selectedSpecialty === 'Todas' ? '' : selectedSpecialty,
+          search: searchQuery
+        });
+        if (Array.isArray(response)) {
+          setDoctors(response as unknown as Doctor[]);
+        } else {
+          setDoctors([]);
+          setError('Respuesta inesperada del servidor');
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'No se pudieron cargar los médicos');
+        setDoctors([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadDoctors();
+  }, [selectedSpecialty, searchQuery]);
+
+  // When doctors or selectedDate change, fetch slots for the date (or today)
+  useEffect(() => {
+    if (!doctors || doctors.length === 0) return;
+
+    const fetchSlotsForDate = async () => {
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      const today = new Date();
+      const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      const dateToCheck = selectedDate || ymd(today);
+
+      const results = await Promise.all(
+        doctors.map(async (doc) => {
+          try {
+            const res = await getDoctorSlots(doc.id, dateToCheck);
+            if (res && Array.isArray(res.slots)) {
+              const first = res.slots.find((s: any) => s.available);
+              if (first) {
+                // build local ISO for the date+time
+                const iso = new Date(`${dateToCheck}T${first.time}:00`).toISOString();
+                return [doc.id, iso];
+              }
+            }
+          } catch (e) {
+            // ignore per-doctor errors
+          }
+          return [doc.id, null];
+        })
+      );
+
+      const map: Record<string, string | null> = {};
+      for (const [id, iso] of results) map[id as string] = iso as string | null;
+      setOverrideNext(map);
+    };
+
+    fetchSlotsForDate();
+  }, [doctors, selectedDate]);
+
+  const filteredDoctors = doctors.filter(doctor => {
     const matchesSearch = doctor.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          doctor.specialty.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesSpecialty = selectedSpecialty === 'Todas' || doctor.specialty === selectedSpecialty;
@@ -99,7 +113,15 @@ export function AppointmentSearch({ onBack, onSelectDoctor }: AppointmentSearchP
   });
 
   const formatDateTime = (dateTime: string) => {
-    const date = new Date(dateTime);
+    const timestamp = Date.parse(dateTime);
+    if (Number.isNaN(timestamp)) {
+      return {
+        date: 'Fecha no disponible',
+        time: ''
+      };
+    }
+
+    const date = new Date(timestamp);
     return {
       date: date.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' }),
       time: date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
@@ -224,14 +246,25 @@ export function AppointmentSearch({ onBack, onSelectDoctor }: AppointmentSearchP
           {/* Main Content - Results */}
           <div className="flex-1">
             <div className="mb-4">
-              <p style={{ fontSize: 'var(--text-body)', color: 'var(--muted-foreground)' }}>
-                {filteredDoctors.length} {filteredDoctors.length === 1 ? 'resultado' : 'resultados'} encontrados
-              </p>
+              {loading ? (
+                <p style={{ fontSize: 'var(--text-body)', color: 'var(--muted-foreground)' }}>
+                  Cargando médicos...
+                </p>
+              ) : error ? (
+                <p style={{ fontSize: 'var(--text-body)', color: 'var(--destructive)' }}>
+                  {error}
+                </p>
+              ) : (
+                <p style={{ fontSize: 'var(--text-body)', color: 'var(--muted-foreground)' }}>
+                  {filteredDoctors.length} {filteredDoctors.length === 1 ? 'resultado' : 'resultados'} encontrados
+                </p>
+              )}
             </div>
 
             <div className="space-y-4">
               {filteredDoctors.map((doctor) => {
-                const nextAvail = formatDateTime(doctor.nextAvailable);
+                const displayed = overrideNext[doctor.id] || doctor.nextAvailable;
+                const nextAvail = formatDateTime(displayed);
                 return (
                   <div
                     key={doctor.id}
@@ -312,7 +345,7 @@ export function AppointmentSearch({ onBack, onSelectDoctor }: AppointmentSearchP
                           {/* Actions */}
                           <div className="flex gap-3">
                             <button
-                              onClick={() => onSelectDoctor(doctor.id)}
+                              onClick={() => onSelectDoctor(doctor.id, doctor.name)}
                               className="px-6 py-2 rounded-lg transition-all duration-200 hover:opacity-90"
                               style={{
                                 backgroundColor: 'var(--primary)',

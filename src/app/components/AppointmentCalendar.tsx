@@ -1,8 +1,11 @@
 import { ArrowLeft, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { bookAppointment, getDoctorSlots } from '../api';
+import { success as notifySuccess, error as notifyError } from '../utils/notify';
 
 interface AppointmentCalendarProps {
   onBack: () => void;
+  doctorId: string;
   doctorName: string;
 }
 
@@ -21,24 +24,66 @@ const generateTimeSlots = (): TimeSlot[] => {
   for (let hour = morningStart; hour < morningEnd; hour++) {
     for (let minute = 0; minute < 60; minute += 30) {
       const time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-      slots.push({ time, available: Math.random() > 0.3 });
+      slots.push({ time, available: false });
     }
   }
 
   for (let hour = afternoonStart; hour < afternoonEnd; hour++) {
     for (let minute = 0; minute < 60; minute += 30) {
       const time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-      slots.push({ time, available: Math.random() > 0.3 });
+      slots.push({ time, available: false });
     }
   }
 
   return slots;
 };
 
-export function AppointmentCalendar({ onBack, doctorName }: AppointmentCalendarProps) {
+export function AppointmentCalendar({ onBack, doctorId, doctorName }: AppointmentCalendarProps) {
   const [currentWeekStart, setCurrentWeekStart] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [slots, setSlots] = useState<TimeSlot[]>(generateTimeSlots());
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [slotsError, setSlotsError] = useState('');
+  const [reason, setReason] = useState('Consulta médica');
+  const [bookingError, setBookingError] = useState('');
+  const [bookingSuccess, setBookingSuccess] = useState('');
+  const [bookingLoading, setBookingLoading] = useState(false);
+
+  useEffect(() => {
+    const loadSlots = async () => {
+      if (!selectedDate) {
+        return;
+      }
+
+      setSlotsLoading(true);
+      setSlotsError('');
+
+      try {
+        const dateString = selectedDate.toISOString().slice(0, 10);
+        const response = await getDoctorSlots(doctorId, dateString);
+        if (response?.slots) {
+          setSlots(response.slots);
+          console.log('Slots cargados:', doctorId, response.slots);
+        } else {
+          setSlots(generateTimeSlots());
+          // setSlots([]);
+        }
+      } catch (error) {
+        setSlotsError(
+          error instanceof Error
+            ? error.message
+            : 'No se pudieron cargar los horarios',
+        );
+        setSlots(generateTimeSlots());
+        // setSlots([]);
+      } finally {
+        setSlotsLoading(false);
+      }
+    };
+
+    loadSlots();
+  }, [selectedDate, doctorId]);
 
   const getWeekDays = (startDate: Date): Date[] => {
     const days: Date[] = [];
@@ -62,7 +107,6 @@ export function AppointmentCalendar({ onBack, doctorName }: AppointmentCalendarP
   };
 
   const weekDays = getWeekDays(currentWeekStart);
-  const timeSlots = generateTimeSlots();
 
   const formatDayHeader = (date: Date) => ({
     dayName: date.toLocaleDateString('es-ES', { weekday: 'short' }),
@@ -80,10 +124,33 @@ export function AppointmentCalendar({ onBack, doctorName }: AppointmentCalendarP
     return date1.toDateString() === date2.toDateString();
   };
 
-  const handleConfirmAppointment = () => {
-    if (selectedDate && selectedTime) {
-      alert(`Cita confirmada:\nMédico: ${doctorName}\nFecha: ${selectedDate.toLocaleDateString('es-ES')}\nHora: ${selectedTime}`);
-      onBack();
+  const handleConfirmAppointment = async () => {
+    if (!selectedDate || !selectedTime) {
+      setBookingError('Seleccione una fecha y un horario.');
+      return;
+    }
+
+    setBookingLoading(true);
+    setBookingError('');
+    setBookingSuccess('');
+
+    try {
+      const date = selectedDate.toISOString().slice(0, 10);
+      await bookAppointment({
+        doctorId,
+        date,
+        time: selectedTime,
+        reason
+      });
+      setBookingSuccess('Cita agendada correctamente.');
+      notifySuccess('Cita agendada correctamente.');
+      setTimeout(() => onBack(), 1200);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'No se pudo agendar la cita';
+      setBookingError(msg);
+      notifyError('Error', msg);
+    } finally {
+      setBookingLoading(false);
     }
   };
 
@@ -205,81 +272,124 @@ export function AppointmentCalendar({ onBack, doctorName }: AppointmentCalendarP
                 </h3>
               </div>
 
-              {/* Morning Slots */}
-              <div className="mb-6">
-                <p className="mb-3" style={{ fontSize: 'var(--text-body)', color: 'var(--muted-foreground)' }}>
-                  Mañana
-                </p>
-                <div className="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
-                  {timeSlots.filter(slot => {
-                    const hour = parseInt(slot.time.split(':')[0]);
-                    return hour < 13;
-                  }).map((slot, index) => (
-                    <button
-                      key={index}
-                      onClick={() => slot.available && setSelectedTime(slot.time)}
-                      disabled={!slot.available}
-                      className="px-4 py-3 rounded-lg transition-all duration-200 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-                      style={{
-                        backgroundColor: selectedTime === slot.time ? 'var(--secondary)' : slot.available ? 'var(--primary)' : 'var(--muted)',
-                        color: selectedTime === slot.time ? 'var(--secondary-foreground)' : slot.available ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
-                        fontSize: 'var(--text-caption)'
-                      }}
-                    >
-                      {slot.time}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {/* Check if there are any available slots */}
+              {slots.some(slot => slot.available) ? (
+                <>
+                  {/* Morning Slots */}
+                  <div className="mb-6">
+                    <p className="mb-3" style={{ fontSize: 'var(--text-body)', color: 'var(--muted-foreground)' }}>
+                      Mañana
+                    </p>
+                    <div className="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
+                      {slots.filter(slot => {
+                        const hour = parseInt(slot.time.split(':')[0]);
+                        return hour < 13;
+                      }).map((slot, index) => (
+                        <button
+                          key={index}
+                          onClick={() => slot.available && setSelectedTime(slot.time)}
+                          disabled={!slot.available}
+                          className="px-4 py-3 rounded-lg transition-all duration-200 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                          style={{
+                            backgroundColor: selectedTime === slot.time ? 'var(--secondary)' : slot.available ? 'var(--primary)' : 'var(--muted)',
+                            color: selectedTime === slot.time ? 'var(--secondary-foreground)' : slot.available ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
+                            fontSize: 'var(--text-caption)'
+                          }}
+                        >
+                          {slot.time}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-              {/* Afternoon Slots */}
-              <div>
-                <p className="mb-3" style={{ fontSize: 'var(--text-body)', color: 'var(--muted-foreground)' }}>
-                  Tarde
-                </p>
-                <div className="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
-                  {timeSlots.filter(slot => {
-                    const hour = parseInt(slot.time.split(':')[0]);
-                    return hour >= 15;
-                  }).map((slot, index) => (
-                    <button
-                      key={index}
-                      onClick={() => slot.available && setSelectedTime(slot.time)}
-                      disabled={!slot.available}
-                      className="px-4 py-3 rounded-lg transition-all duration-200 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-                      style={{
-                        backgroundColor: selectedTime === slot.time ? 'var(--secondary)' : slot.available ? 'var(--primary)' : 'var(--muted)',
-                        color: selectedTime === slot.time ? 'var(--secondary-foreground)' : slot.available ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
-                        fontSize: 'var(--text-caption)'
-                      }}
-                    >
-                      {slot.time}
-                    </button>
-                  ))}
+                  {/* Afternoon Slots */}
+                  <div>
+                    <p className="mb-3" style={{ fontSize: 'var(--text-body)', color: 'var(--muted-foreground)' }}>
+                      Tarde
+                    </p>
+                    <div className="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">
+                      {slots.filter(slot => {
+                        const hour = parseInt(slot.time.split(':')[0]);
+                        return hour >= 15;
+                      }).map((slot, index) => (
+                        <button
+                          key={index}
+                          onClick={() => slot.available && setSelectedTime(slot.time)}
+                          disabled={!slot.available}
+                          className="px-4 py-3 rounded-lg transition-all duration-200 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                          style={{
+                            backgroundColor: selectedTime === slot.time ? 'var(--secondary)' : slot.available ? 'var(--primary)' : 'var(--muted)',
+                            color: selectedTime === slot.time ? 'var(--secondary-foreground)' : slot.available ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
+                            fontSize: 'var(--text-caption)'
+                          }}
+                        >
+                          {slot.time}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="py-12 text-center rounded-lg" style={{ backgroundColor: 'var(--muted)', color: 'var(--muted-foreground)' }}>
+                  <p style={{ fontSize: 'var(--text-body)' }}>
+                    No hay horarios disponibles para esta fecha
+                  </p>
                 </div>
-              </div>
+              )}
 
               {/* Legend */}
-              <div className="mt-6 flex items-center gap-6">
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded" style={{ backgroundColor: 'var(--primary)' }} />
-                  <span style={{ fontSize: 'var(--text-caption)', color: 'var(--muted-foreground)' }}>
-                    Disponible
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded" style={{ backgroundColor: 'var(--secondary)' }} />
-                  <span style={{ fontSize: 'var(--text-caption)', color: 'var(--muted-foreground)' }}>
-                    Seleccionado
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded" style={{ backgroundColor: 'var(--muted)' }} />
-                  <span style={{ fontSize: 'var(--text-caption)', color: 'var(--muted-foreground)' }}>
-                    No disponible
-                  </span>
+              <div className="mt-6 flex flex-col gap-3">
+                {slotsLoading && (
+                  <p style={{ fontSize: 'var(--text-body)', color: 'var(--muted-foreground)' }}>
+                    Cargando horarios...
+                  </p>
+                )}
+                {slotsError && (
+                  <p style={{ fontSize: 'var(--text-body)', color: 'var(--error)' }}>
+                    {slotsError}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-6">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded" style={{ backgroundColor: 'var(--primary)' }} />
+                    <span style={{ fontSize: 'var(--text-caption)', color: 'var(--muted-foreground)' }}>
+                      Disponible
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded" style={{ backgroundColor: 'var(--secondary)' }} />
+                    <span style={{ fontSize: 'var(--text-caption)', color: 'var(--muted-foreground)' }}>
+                      Seleccionado
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded" style={{ backgroundColor: 'var(--muted)' }} />
+                    <span style={{ fontSize: 'var(--text-caption)', color: 'var(--muted-foreground)' }}>
+                      No disponible
+                    </span>
+                  </div>
                 </div>
               </div>
+              {selectedTime && (
+
+              <div className="mt-6">
+                <label className="block mb-2" style={{ color: 'var(--foreground)' }}>
+                  Motivo de la consulta
+                </label>
+                <textarea
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  className="w-full rounded-lg border p-3 resize-none"
+                  style={{
+                    backgroundColor: 'var(--input)',
+                    color: 'var(--foreground)',
+                    borderColor: 'var(--border)'
+                  }}
+                  rows={4}
+                  placeholder="Describe el motivo de la cita"
+                />
+              </div>
+              )}
             </div>
           )}
 
@@ -317,7 +427,16 @@ export function AppointmentCalendar({ onBack, doctorName }: AppointmentCalendarP
                 <span style={{ color: 'var(--muted-foreground)' }}>Hora: </span>
                 {selectedTime}
               </p>
+              <p style={{ fontSize: 'var(--text-body)', color: 'var(--foreground)' }}>
+                <span style={{ color: 'var(--muted-foreground)' }}>Motivo: </span>
+                {reason}
+              </p>
             </div>
+          </div>
+        )}
+        {(bookingError || bookingSuccess) && (
+          <div className="mt-6 rounded-lg p-4" style={{ backgroundColor: bookingError ? 'rgba(248, 113, 113, 0.12)' : 'rgba(34, 197, 94, 0.12)', color: bookingError ? 'var(--error)' : 'var(--success)' }}>
+            {bookingError || bookingSuccess}
           </div>
         )}
       </main>

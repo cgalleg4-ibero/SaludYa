@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { registerUser } from '../api';
 
 interface RegisterProps {
   onSwitchToLogin: () => void;
@@ -21,11 +22,14 @@ export function Register({ onSwitchToLogin }: RegisterProps) {
     telefono: '',
     password: '',
     confirmPassword: '',
-    tipoUsuario: 'paciente'
+    tipoUsuario: 'patient',
+    especialidad: ''
   });
 
   const [errors, setErrors] = useState<FormErrors>({});
   const [showSuccess, setShowSuccess] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -66,16 +70,34 @@ export function Register({ onSwitchToLogin }: RegisterProps) {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage('');
 
-    if (validateForm()) {
-      console.log('Registration data:', formData);
+    if (!validateForm()) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await registerUser({
+        nombre: formData.nombre,
+        apellido: formData.apellido,
+        email: formData.email,
+        telefono: formData.telefono,
+        password: formData.password,
+        role: formData.tipoUsuario,
+        especialidad: formData.tipoUsuario === 'doctor' ? formData.especialidad : ''
+      });
       setShowSuccess(true);
       setTimeout(() => {
         setShowSuccess(false);
         onSwitchToLogin();
-      }, 2000);
+      }, 1500);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Error registrando usuario');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -102,6 +124,16 @@ export function Register({ onSwitchToLogin }: RegisterProps) {
         </div>
 
         <div className="rounded-lg p-8 shadow-lg" style={{ backgroundColor: 'var(--card)' }}>
+          {showSuccess && (
+            <div className="mb-4 rounded-lg px-4 py-3" style={{ backgroundColor: 'rgba(54, 179, 126, 0.1)', color: 'var(--secondary)', border: `1px solid var(--secondary)` }}>
+              Cuenta creada exitosamente. Redirigiendo a inicio de sesión...
+            </div>
+          )}
+          {errorMessage && (
+            <div className="mb-4 rounded-lg px-4 py-3" style={{ backgroundColor: 'rgba(222, 53, 11, 0.1)', color: 'var(--destructive)', border: `1px solid var(--destructive)` }}>
+              {errorMessage}
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
@@ -236,10 +268,35 @@ export function Register({ onSwitchToLogin }: RegisterProps) {
                   color: 'var(--foreground)'
                 }}
               >
-                <option value="paciente">Paciente</option>
-                <option value="medico">Médico</option>
+                <option value="patient">Paciente</option>
+                <option value="doctor">Médico</option>
               </select>
             </div>
+
+            {formData.tipoUsuario === 'doctor' && (
+              <div>
+                <label
+                  htmlFor="especialidad"
+                  className="block mb-2"
+                  style={{ fontSize: 'var(--text-body)', color: 'var(--foreground)' }}
+                >
+                  Especialidad
+                </label>
+                <input
+                  id="especialidad"
+                  type="text"
+                  value={formData.especialidad}
+                  onChange={(e) => handleChange('especialidad', e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2"
+                  style={{
+                    backgroundColor: 'var(--input-background)',
+                    border: `1px solid var(--border)`,
+                    color: 'var(--foreground)'
+                  }}
+                  placeholder="Cardiología"
+                />
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>

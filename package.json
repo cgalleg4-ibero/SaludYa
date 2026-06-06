@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite"
+    "dev": "vite",
+    "dev:server": "pnpm --dir server dev"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -47,6 +48,7 @@
     "embla-carousel-react": "8.6.0",
     "input-otp": "1.4.2",
     "lucide-react": "0.487.0",
+    "sweetalert2": "^11.7.27",
     "motion": "12.23.24",
     "next-themes": "0.4.6",
     "react-day-picker": "8.10.1",
@@ -66,8 +68,12 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
+    "@types/react": "18.3.6",
+    "@types/react-dom": "18.3.3",
+    "@types/lodash": "4.14.198",
     "@vitejs/plugin-react": "4.7.0",
     "tailwindcss": "4.1.12",
+    "typescript": "5.6.2",
     "vite": "6.3.5"
   },
   "peerDependencies": {

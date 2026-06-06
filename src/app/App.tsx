@@ -1,29 +1,68 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
 import { PatientDashboard } from './components/PatientDashboard';
 import { DoctorDashboard } from './components/DoctorDashboard';
+import { AdminDashboard } from './components/AdminDashboard';
 import { UserProfile } from './components/UserProfile';
 import { AppointmentSearch } from './components/AppointmentSearch';
 import { AppointmentCalendar } from './components/AppointmentCalendar';
+import { clearToken, getProfile, saveToken } from './api';
 
 type View = 'login' | 'register' | 'dashboard' | 'appointment-search' | 'appointment-calendar' | 'profile';
-type UserType = 'patient' | 'doctor';
+type UserType = 'patient' | 'doctor' | 'admin';
+
+type User = {
+  _id: string;
+  nombre: string;
+  apellido: string;
+  email: string;
+  telefono: string;
+  role: UserType;
+};
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('login');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userType, setUserType] = useState<UserType>('patient');
+  const [token, setToken] = useState<string | null>(localStorage.getItem('saludya_token'));
+  const [user, setUser] = useState<User | null>(null);
   const [selectedDoctor, setSelectedDoctor] = useState<{ id: string; name: string } | null>(null);
 
-  const handleLogin = (type: UserType) => {
-    setIsAuthenticated(true);
-    setUserType(type);
+  useEffect(() => {
+    if (!token) {
+      setCurrentView('login');
+      setUser(null);
+      return;
+    }
+
+    const loadProfile = async () => {
+      try {
+        const profile = await getProfile();
+        setUser(profile);
+        setCurrentView('dashboard');
+      } catch (error) {
+        clearToken();
+        setToken(null);
+        setUser(null);
+        setCurrentView('login');
+      }
+    };
+
+    if (!user) {
+      loadProfile();
+    }
+  }, [token]);
+
+  const handleLoginSuccess = (newToken: string, profile: User) => {
+    saveToken(newToken);
+    setToken(newToken);
+    setUser(profile);
     setCurrentView('dashboard');
   };
 
   const handleLogout = () => {
-    setIsAuthenticated(false);
+    clearToken();
+    setToken(null);
+    setUser(null);
     setCurrentView('login');
   };
 
@@ -40,13 +79,13 @@ export default function App() {
     setCurrentView('profile');
   };
 
-  if (!isAuthenticated) {
+  if (!token || !user) {
     return (
       <div style={{ backgroundColor: 'var(--background)' }}>
         {currentView === 'login' ? (
           <Login
             onSwitchToRegister={() => setCurrentView('register')}
-            onLoginSuccess={handleLogin}
+            onLoginSuccess={handleLoginSuccess}
           />
         ) : (
           <Register onSwitchToLogin={() => setCurrentView('login')} />
@@ -57,15 +96,25 @@ export default function App() {
 
   return (
     <div style={{ backgroundColor: 'var(--background)' }}>
-      {currentView === 'dashboard' && userType === 'patient' && (
+      {currentView === 'dashboard' && user.role === 'patient' && (
         <PatientDashboard
+          user={user}
           onLogout={handleLogout}
           onNewAppointment={handleNewAppointment}
           onViewProfile={handleViewProfile}
         />
       )}
-      {currentView === 'dashboard' && userType === 'doctor' && (
+      {currentView === 'dashboard' && user.role === 'doctor' && (
         <DoctorDashboard
+          doctorId={user._id}
+          user={user}
+          onLogout={handleLogout}
+          onViewProfile={handleViewProfile}
+        />
+      )}
+      {currentView === 'dashboard' && user.role === 'admin' && (
+        <AdminDashboard
+          user={user}
           onLogout={handleLogout}
           onViewProfile={handleViewProfile}
         />
@@ -76,25 +125,13 @@ export default function App() {
       {currentView === 'appointment-search' && (
         <AppointmentSearch
           onBack={() => setCurrentView('dashboard')}
-          onSelectDoctor={(doctorId) => {
-            const doctors = [
-              { id: '1', name: 'Dra. María González' },
-              { id: '2', name: 'Dr. Carlos Ramírez' },
-              { id: '3', name: 'Dra. Ana Martínez' },
-              { id: '4', name: 'Dr. Roberto Silva' },
-              { id: '5', name: 'Dra. Laura Fernández' },
-              { id: '6', name: 'Dr. Pedro López' }
-            ];
-            const doctor = doctors.find(d => d.id === doctorId);
-            if (doctor) {
-              handleSelectDoctor(doctor.id, doctor.name);
-            }
-          }}
+          onSelectDoctor={handleSelectDoctor}
         />
       )}
       {currentView === 'appointment-calendar' && selectedDoctor && (
         <AppointmentCalendar
           onBack={() => setCurrentView('appointment-search')}
+          doctorId={selectedDoctor.id}
           doctorName={selectedDoctor.name}
         />
       )}
